@@ -1,16 +1,17 @@
-use regex::Regex;
+use semver::{Version};
 use std::env;
 use std::process;
+use ureq::{Agent, AgentBuilder};
 
 #[derive(Debug)]
 struct Credentials {
-    repository_url: String,
+    repository: String,
     github_token: String,
     // Slack credentials
 }
 
 fn parse_env_variables() -> Result<Credentials, String> {
-    let key = "RELEASEMOPS_REPOSITORY_URL";
+    let key = "RELEASEMOPS_REPOSITORY";
     let repo = match env::var(key) {
         Ok(value) => value,
         Err(e) => return Err(format!("{}: {}", key, e))
@@ -22,7 +23,7 @@ fn parse_env_variables() -> Result<Credentials, String> {
         Err(e) => return Err(format!("{}: {}", key, e))
     };
 
-    let cred = Credentials {repository_url: repo, github_token: github_token};
+    let cred = Credentials {repository: repo, github_token: github_token};
     return Ok(cred);
 }
 
@@ -41,6 +42,32 @@ fn print_error_and_exit(error_message: &str) {
 // - Envoie un message sur #ms-release en précisant quand sont prêts les binaires et les Docker image
 fn execute_rc(cred: Credentials, version: &str) {
     // ureq ? https://github.com/algesten/ureq
+    // https://lib.rs/crates/isahc
+    // https://lib.rs/crates/reqwest
+
+    let repo_url = format!("https://api.github.com/repos/{}", cred.repository.as_str());
+    let body = ureq::get(repo_url.as_str())
+        .set("Authorization", format!("token {}", cred.github_token.as_str()).as_str())
+        .set("Accept", "application/vnd.github.v3+json")
+        .call();
+
+    match body {
+        Ok(v) => println!("{:?}", v.into_string()),
+        Err(e) => println!("{}", e),
+    }
+
+    // println!("body: {:?}");
+
+    return ();
+}
+
+fn check_version(version_str: &str) -> Result<(), String>{
+    if let Ok(version) = Version::parse(version_str) {
+        if version.pre.is_empty() && version.build.is_empty() {
+            return Ok(())
+        }
+    }
+    return Err(format!("Invalid version {}. Valid format: vX.Y.Z", version_str))
 }
 
 fn main() {
@@ -104,14 +131,16 @@ fn main() {
     let version = v[1].trim_start_matches("v");
     println!("Command: {}", command);
     println!("Version: {}", version);
-    let re = Regex::new(r"^[0-9]+\.[0-9]+\.[0-9]+$").unwrap();
-    if !re.is_match(version) {
-        print_error_and_exit("Invalid version. Valid format: vX.Y.Z")
-    }
+
+
+    match check_version(version) {
+        Ok(_) => println!("Valid version: {}", version),
+        Err(e) => return print_error_and_exit(e.as_str()),
+    };
 
     // Execute command
     match command.as_str() {
-        "rc" => todo!(),
+        "rc" => execute_rc(credentials, version),
         "release" => todo!(),
         "prepare-hotfix" => todo!(),
         _ => print_error_and_exit("Invalid command")
